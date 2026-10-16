@@ -43,6 +43,20 @@ wire data_rdy;          // data ready
 wire data_strobe;       // data strobe for each byte
 wire [7:0] ukpdat;		// actual data
 reg [7:0] regs [7];     // 0 (VID_L), 1 (VID_H), 2 (PID_L), 3 (PID_H), 4 (INTERFACE_CLASS), 5 (INTERFACE_SUBCLASS), 6 (INTERFACE_PROTOCOL)
+
+// --- for controller vid:pid = 0810:0001 --- start
+wire [15:0] dev_vid;
+wire [15:0] dev_pid;
+wire is_0810_0001;
+
+assign dev_vid = {regs[1], regs[0]};
+assign dev_pid = {regs[3], regs[2]};
+
+assign is_0810_0001 =
+    (dev_vid == 16'h0810) &&
+    (dev_pid == 16'h0001);
+// --- for controller vid:pid = 0810:0001 --- end
+
 wire save;			    // save dat[b] to output register r
 wire [3:0] save_r;      // which register to save to
 wire [3:0] save_b;      // dat[b]
@@ -99,55 +113,105 @@ always @(posedge usbclk) begin : process_in_data
                 2: mouse_dy <= ukpdat;
                 endcase
             end else if (typ == 3) begin    // gamepad
-                // A typical report layout:
-                // - d[3] is X axis (0: left, 255: right)
-                // - d[4] is Y axis
-                // - d[5][7:4] is buttons YBAX
-                // - d[6][5:4] is buttons START,SELECT
-                // - d[6][1:0] is buttons LB,RB
-                // Variations:
-                // - Some gamepads uses d[0] and d[1] for X and Y axis.
-                // - Some transmits a different set when d[0][1:0] is 2 (a dualshock adapater)
-                case (rcvct)
-                0: begin
-                    if (ukpdat[1:0] != 2'b10) begin
-                        // for DualShock2 adapter, 2'b10 marks an irrelevant record
-                        valid <= 1;
-                        // game_l <= 0; game_r <= 0; game_u <= 0; game_d <= 0;
-                    end else
-                        valid <= 0;
-                    if (ukpdat==8'h00) {game_l, game_r} <= 2'b10;
-                    if (ukpdat==8'h7f) {game_l, game_r} <= 2'b00;
-                    if (ukpdat==8'hff) {game_l, game_r} <= 2'b01;
+                if (is_0810_0001) begin
+
+                    // -------------------------------------------------
+                    // VID:PID 0810:0001
+                    // Verified report layout:
+                    //   d[3] = X axis
+                    //   d[4] = Y axis
+                    //   d[5][7:4] = YBAX
+                    //   d[6][5:4] = START/SELECT
+                    //   d[6][1:0] = LB/RB
+                    // -------------------------------------------------
+
+                    case (rcvct)
+
+                    3: begin
+                        if (ukpdat < 8'h40)
+                            {game_l, game_r} <= 2'b10;
+                        else if (ukpdat > 8'hC0)
+                            {game_l, game_r} <= 2'b01;
+                        else
+                            {game_l, game_r} <= 2'b00;
+                    end
+
+                    4: begin
+                        if (ukpdat < 8'h40)
+                            {game_u, game_d} <= 2'b10;
+                        else if (ukpdat > 8'hC0)
+                            {game_u, game_d} <= 2'b01;
+                        else
+                            {game_u, game_d} <= 2'b00;
+                    end
+
+                    5: begin
+                        game_x <= ukpdat[4];
+                        game_a <= ukpdat[5];
+                        game_b <= ukpdat[6];
+                        game_y <= ukpdat[7];
+                    end
+
+                    6: begin
+                        game_sel <= ukpdat[4];
+                        game_sta <= ukpdat[5];
+                        game_lb  <= ukpdat[0];
+                        game_rb  <= ukpdat[1];
+                    end
+
+                    endcase
+                end else begin
+                    // -------------------------------------------------
+                    // Original TangCore generic gamepad parser
+                    // -------------------------------------------------
+
+                    case (rcvct)
+
+                    0: begin
+                        if (ukpdat[1:0] != 2'b10) begin
+                            // for DualShock2 adapter,
+                            // 2'b10 marks an irrelevant record
+                            valid <= 1;
+                        end else
+                            valid <= 0;
+
+                        if (ukpdat == 8'h00)
+                            {game_l, game_r} <= 2'b10;
+
+                        if (ukpdat == 8'h7f)
+                            {game_l, game_r} <= 2'b00;
+
+                        if (ukpdat == 8'hff)
+                            {game_l, game_r} <= 2'b01;
+                    end
+
+                    1: begin
+                        if (ukpdat == 8'h00)
+                            {game_u, game_d} <= 2'b10;
+
+                        if (ukpdat == 8'h7f)
+                            {game_u, game_d} <= 2'b00;
+
+                        if (ukpdat == 8'hff)
+                            {game_u, game_d} <= 2'b01;
+                    end
+
+                    5: if (valid) begin
+                        game_x <= ukpdat[4];
+                        game_a <= ukpdat[5];
+                        game_b <= ukpdat[6];
+                        game_y <= ukpdat[7];
+                    end
+
+                    6: if (valid) begin
+                        game_sel <= ukpdat[4];
+                        game_sta <= ukpdat[5];
+                        game_lb  <= ukpdat[0];
+                        game_rb  <= ukpdat[1];
+                    end
+
+                    endcase
                 end
-                1: begin
-                    if (ukpdat==8'h00) {game_u, game_d} <= 2'b10;
-                    if (ukpdat==8'h7f) {game_u, game_d} <= 2'b00;
-                    if (ukpdat==8'hff) {game_u, game_d} <= 2'b01;
-                end
-                // 3: if (valid) begin 
-                //     if (ukpdat[7:6]==2'b00) {game_l, game_r} <= 2'b10;
-                //     if (ukpdat[7:6]==2'b11) {game_l, game_r} <= 2'b01;
-                // end
-                // 4: if (valid) begin 
-                //     if (ukpdat[7:6]==2'b00) {game_u, game_d} <= 2'b10;
-                //     if (ukpdat[7:6]==2'b11) {game_u, game_d} <= 2'b01;
-                // end
-                5: if (valid) begin
-                    game_x <= ukpdat[4];
-                    game_a <= ukpdat[5];
-                    game_b <= ukpdat[6];
-                    game_y <= ukpdat[7];
-                end
-                6: if (valid) begin
-                    game_sel <= ukpdat[4];
-                    game_sta <= ukpdat[5];
-                    game_lb <= ukpdat[0];
-                    game_rb <= ukpdat[1];
-                end
-                endcase
-                // TODO: add any special handling if needed 
-                // (using the detected controller type in 'dev')                
             end
             rcvct <= rcvct + 1;
         end
@@ -393,7 +457,7 @@ module usb_hid_host_rom(clk, adr, data);
 	input [13:0] adr;
 	output [3:0] data;
 	reg [3:0] data; 
-	reg [3:0] mem [536];
+	reg [3:0] mem [635];
 	initial $readmemh("usb_hid_host_rom.hex", mem);
 	always @(posedge clk) data <= mem[adr];
 endmodule

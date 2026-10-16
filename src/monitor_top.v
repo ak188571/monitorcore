@@ -138,17 +138,97 @@ controller_ds2 #(.FREQ(FREQ)) joy2_ds2 (
 wire [11:0] joy_usb1, joy_usb2;
 
 `ifdef USB1
+
 wire clk12;
 wire pll_lock_12;
 wire usb_conerr;
 wire [1:0] usb_type;
-pll_12 pll12(.clkin(sys_clk), .clkout0(clk12), .lock(pll_lock_12));
-usb_hid_host usb_hid_host (
-    .usbclk(clk12), .usbrst_n(pll_lock_12),
-    .usb_dm(usb1_dn), .usb_dp(usb1_dp),
-    .game_snes(joy_usb1), .typ(usb_type), .conerr(usb_conerr)
+wire usb_report;
+
+pll_12 pll12(
+    .clkin(sys_clk),
+    .clkout0(clk12),
+    .lock(pll_lock_12)
 );
-assign led = ~{joy_usb1[4:0], usb_type, usb_conerr};
+
+usb_hid_host usb_hid_host (
+    .usbclk(clk12),
+    .usbrst_n(pll_lock_12),
+    .usb_dm(usb1_dn),
+    .usb_dp(usb1_dp),
+    .game_snes(joy_usb1),
+    .typ(usb_type),
+    .conerr(usb_conerr),
+    .report(usb_report)
+);
+
+
+// -------------------------------------------------
+// USB connection / report diagnostic
+// -------------------------------------------------
+
+// reportを見やすい長さまで保持する
+reg [20:0] report_hold = 0;
+
+// 一度でもconerrが発生したことを記憶する
+reg conerr_seen = 0;
+
+// HID reportを受信するたびにカウント
+reg [7:0] report_count = 0;
+
+always @(posedge clk12) begin
+    if (!pll_lock_12) begin
+        report_hold  <= 0;
+        conerr_seen  <= 0;
+        report_count <= 0;
+    end
+    else begin
+
+        // HID reportを受信したら約100ms表示
+        if (usb_report) begin
+            report_hold  <= 21'd1200000;
+            report_count <= report_count + 1'b1;
+        end
+        else if (report_hold != 0) begin
+            report_hold <= report_hold - 1'b1;
+        end
+
+        // conerrは一度発生したら保持
+        if (usb_conerr)
+            conerr_seen <= 1'b1;
+    end
+end
+
+wire report_recent;
+assign report_recent = (report_hold != 0);
+
+
+// -------------------------------------------------
+// PMOD0 LED diagnostic display
+// -------------------------------------------------
+//
+// LED0 : 12MHz PLL lock
+// LED1 : usb_type[0]
+// LED2 : usb_type[1]
+// LED3 : HID report received recently
+// LED4 : conerr now
+// LED5 : conerr has occurred at least once
+// LED6 : HID report counter
+// LED7 : any joy_usb1 button/direction active
+//
+// PMOD LEDはactive-lowとして反転
+//
+assign led = ~{
+    |joy_usb1,        // LED7
+    report_count[4],  // LED6
+    conerr_seen,      // LED5
+    usb_conerr,       // LED4
+    report_recent,    // LED3
+    usb_type[1],      // LED2
+    usb_type[0],      // LED1
+    pll_lock_12       // LED0
+};
+
 `else
 assign joy_usb1 = 12'b0;
 `endif
@@ -186,5 +266,6 @@ iosys_bl616 #(.CORE_ID(0), .FREQ(FREQ), .COLOR_LOGO(15'b11011_10010_00011)) sys 
     // UART connection to the companion MCU
     .uart_rx(UART_RXD), .uart_tx(UART_TXD)
 );
+
 
 endmodule

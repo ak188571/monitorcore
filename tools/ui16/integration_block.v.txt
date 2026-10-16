@@ -1,0 +1,56 @@
+// UI16 integration BEGIN
+// Both decoders observe the same byte stream. Existing commands remain unchanged.
+`ifndef SIM
+wire [31:0] reg_char_di = {8'b0, x_wr, y_wr, char_wr};
+wire [3:0] reg_char_we = {4{we}};
+`ifdef UI16_ENABLE
+wire [14:0] legacy_color;
+textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
+    .clk(clk), .hclk(hclk), .resetn(resetn),
+    .x(overlay_x), .y(overlay_y), .color(legacy_color),
+    .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
+);
+wire ui16_abort;
+wire ui16_we, ui16_selected, ui16_half;
+wire unused_ui16_error, unused_ui16_busy, unused_ui16_color_valid;
+wire [7:0] ui16_x, ui16_y, ui16_glyph;
+ui16_transport #(.FREQ(FREQ)) ui16_rx (
+    .clk(clk), .resetn(resetn), .rx_data(rx_data), .rx_valid(rx_valid),
+    .abort_frame(ui16_abort), .error(unused_ui16_error), .busy(unused_ui16_busy),
+    .we(ui16_we), .x(ui16_x), .y(ui16_y), .glyph(ui16_glyph),
+    .selected(ui16_selected), .half(ui16_half)
+);
+`ifdef UI16_SELFTEST
+localparam UI16_TEST = 1;
+`else
+localparam UI16_TEST = 0;
+`endif
+wire [14:0] ui16_color;
+ui_textdisp #(.SELFTEST(UI16_TEST != 0)) ui16_disp (
+    .clk(clk), .hclk(hclk), .resetn(resetn),
+    .we(ui16_we), .wr_x(ui16_x), .wr_y(ui16_y), .wr_glyph(ui16_glyph),
+    .wr_selected(ui16_selected), .wr_half(ui16_half),
+    .x(overlay_x), .y(overlay_y), .color(ui16_color), .color_valid(unused_ui16_color_valid)
+);
+reg ui16_mode = 0;
+always @(posedge clk) begin
+    if (!resetn) ui16_mode <= 0;
+    else if (ui16_we) ui16_mode <= 1;
+    else if (we) ui16_mode <= 0;
+end
+// The display mode crosses into the HDMI clock domain as a single-bit control.
+reg [1:0] ui16_mode_sync = 0;
+always @(posedge hclk) begin
+    if (!resetn) ui16_mode_sync <= 0;
+    else ui16_mode_sync <= {ui16_mode_sync[0],ui16_mode};
+end
+assign overlay_color = (UI16_TEST != 0 || ui16_mode_sync[1]) ? ui16_color : legacy_color;
+`else
+textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
+    .clk(clk), .hclk(hclk), .resetn(resetn),
+    .x(overlay_x), .y(overlay_y), .color(overlay_color),
+    .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
+);
+`endif
+`endif
+// UI16 integration END
