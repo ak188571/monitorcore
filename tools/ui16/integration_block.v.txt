@@ -13,7 +13,8 @@ textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
 wire ui16_abort;
 wire ui16_we, ui16_selected, ui16_half;
 wire unused_ui16_error, unused_ui16_busy, unused_ui16_color_valid;
-wire [7:0] ui16_x, ui16_y, ui16_glyph;
+wire [7:0] ui16_x, ui16_y;
+wire [11:0] ui16_glyph;
 ui16_transport #(.FREQ(FREQ)) ui16_rx (
     .clk(clk), .resetn(resetn), .rx_data(rx_data), .rx_valid(rx_valid),
     .abort_frame(ui16_abort), .error(unused_ui16_error), .busy(unused_ui16_busy),

@@ -9,13 +9,14 @@ module ui_textdisp #(
     input logic hclk,
     input logic resetn,
     input logic we,
-    input logic [7:0] wr_x, wr_y, wr_glyph,
+    input logic [7:0] wr_x, wr_y,
+    input logic [11:0] wr_glyph,
     input logic wr_selected, wr_half,
     input logic [7:0] x, y,
     output logic [14:0] color,
     output logic color_valid
 );
-    logic [9:0] cells [0:(1 << `UI_CELL_ADDR_BITS)-1];
+    logic [13:0] cells [0:(1 << `UI_CELL_ADDR_BITS)-1];
     logic [15:0] font_rom [0:`UI_FONT_ROM_SIZE-1];
     initial begin
         if (SELFTEST)
@@ -37,7 +38,7 @@ module ui_textdisp #(
         if (!resetn) reset_pipe <= 0;
         else reset_pipe <= {reset_pipe[0], 1'b1};
     end
-    logic [9:0] cell_q;
+    logic [13:0] cell_q;
     logic [2:0] xoff1;
     logic [3:0] yoff1, glyph_x2;
     logic selected2, valid1, valid2;
@@ -51,9 +52,9 @@ module ui_textdisp #(
         xoff1 <= x[2:0]; yoff1 <= y[3:0];
         valid1 <= reset_pipe[1] && int'(y)<`UI_SCREEN_HEIGHT;
 
-        font_q <= font_rom[{cell_q[7:0],yoff1}];
-        glyph_x2 <= {cell_q[9],xoff1};
-        selected2 <= cell_q[8]; valid2 <= valid1;
+        font_q <= font_rom[`UI_FONT_ADDR_BITS'({cell_q[11:0],yoff1})];
+        glyph_x2 <= {cell_q[13],xoff1};
+        selected2 <= cell_q[12]; valid2 <= valid1;
 
         color_valid <= valid2 && reset_pipe[1];
         color <= 0;

@@ -10,6 +10,8 @@ module ui16_hw_top (
     output logic abort_frame,error,busy,
     output logic [7:0] serial_data,
     output logic serial_valid
+    ,output logic [31:0] writes
+    ,output logic [11:0] last_glyph
 );
     wire unused_idle, unused_eop;
     async_receiver #(.ClkFrequency(50_000_000),.Baud(2_000_000)) rx (
@@ -17,8 +19,13 @@ module ui16_hw_top (
         .RxD_idle(unused_idle),.RxD_endofpacket(unused_eop)
     );
     wire we,selected,half;
-    wire [7:0] wx,wy,glyph;
+    wire [7:0] wx,wy;
+    wire [11:0] glyph;
     wire unused_selftest_valid;
+    always_ff @(posedge clk) begin
+        if (!resetn) begin writes <= 0; last_glyph <= 0; end
+        else if (we) begin writes <= writes + 1; last_glyph <= glyph; end
+    end
     ui16_transport #(.FREQ(50_000_000),.TIMEOUT_MS(10)) transport (
         .clk(clk),.resetn(resetn),.rx_data(use_serial?serial_data:byte_data),
         .rx_valid(use_serial?serial_valid:byte_valid),.abort_frame(abort_frame),

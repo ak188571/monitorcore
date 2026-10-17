@@ -9,7 +9,8 @@ module ui16_transport #(
     output logic busy,
     output logic error,
     output logic we,
-    output logic [7:0] x, y, glyph,
+    output logic [7:0] x, y,
+    output logic [11:0] glyph,
     output logic selected, half
 );
     localparam integer TIMEOUT_CYCLES = (FREQ/1000)*TIMEOUT_MS;
