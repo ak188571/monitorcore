@@ -16,7 +16,8 @@ module ui_frame_decoder (
     output logic [7:0] y,
     output logic [11:0] glyph,
     output logic selected,
-    output logic half
+    output logic half,
+    output logic vertical_half
 );
     localparam int COLS = `UI_TEXT_UNITS_PER_ROW;
     localparam int ROWS = `UI_MENU_ROWS;
@@ -28,6 +29,7 @@ module ui_frame_decoder (
     logic good;
     logic [11:0] stage_glyph [0:COLS-1];
     logic [1:0] stage_attr [0:COLS-1];
+    logic stage_vertical_half [0:COLS-1];
     integer index;
     assign busy = state == COMMIT;
     assign receiving = state != IDLE && state != COMMIT;
@@ -37,7 +39,7 @@ module ui_frame_decoder (
         error <= 0;
         if (reset) begin
             state <= IDLE;
-            x <= 0; y <= 0; glyph <= 0; selected <= 0; half <= 0;
+            x <= 0; y <= 0; glyph <= 0; selected <= 0; half <= 0; vertical_half <= 0;
             length <= 0; pos <= 0; good <= 0; index <= 0;
         end else if (state == COMMIT) begin
             if (rx_valid) error <= 1; // Too-fast producer; real UART spacing is much longer.
@@ -47,6 +49,7 @@ module ui_frame_decoder (
             glyph <= stage_glyph[index];
             selected <= stage_attr[index][`UI_ATTR_SELECTED_BIT];
             half <= stage_attr[index][`UI_ATTR_HALF_BIT];
+            vertical_half <= stage_vertical_half[index];
             if (index + 1 == int'(count)) state <= IDLE;
             else index <= index + 1;
         end else if (rx_abort) begin
@@ -88,8 +91,9 @@ module ui_frame_decoder (
                             if (((int'(pos) - 3) >> 1) < COLS) begin
                                 stage_glyph[(int'(pos) - 3) >> 1] <= {rx_data[5:2], pending_glyph};
                                 stage_attr[(int'(pos) - 3) >> 1] <= rx_data[1:0];
+                                stage_vertical_half[(int'(pos) - 3) >> 1] <= rx_data[`UI_ATTR_VERTICAL_HALF_BIT];
                             end
-                            if ((rx_data[7:6] != 0 || int'({rx_data[5:2], pending_glyph}) >= `UI_GLYPH_COUNT)) good <= 0;
+                            if ((rx_data[7] != 0 || int'({rx_data[5:2], pending_glyph}) >= `UI_GLYPH_COUNT)) good <= 0;
                         end else pending_glyph <= rx_data;
                     end
                     endcase
@@ -98,7 +102,7 @@ module ui_frame_decoder (
                     state <= IDLE;
                     if (command == `UI_ROW_COMMAND) begin
                         if (good && pos >= 4 && !pos[0] &&
-                            rx_data[7:6] == 0 && int'({rx_data[5:2], pending_glyph}) < `UI_GLYPH_COUNT) begin
+                            rx_data[7] == 0 && int'({rx_data[5:2], pending_glyph}) < `UI_GLYPH_COUNT) begin
                             index <= 0; state <= COMMIT;
                         end else error <= 1;
                     end

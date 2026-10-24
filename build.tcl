@@ -49,7 +49,7 @@ if {$dev eq "nano20k"} {
     add_file -type cst "src/boards/console.cst"
 } elseif {$dev eq "console138k"} {
     set_device GW5AST-LV138PG484AC1/I0 -device_version B
-    add_file -type verilog "src/boards/console138k.v"
+    add_file -type verilog "src/boards/console138k_ui_uart.v"
     add_file -type verilog "src/pll/pll_27.v"
     add_file -type verilog "src/pll/pll_74.v"
     add_file -type verilog "src/pll/pll_12.v"
@@ -77,6 +77,9 @@ add_file -type verilog "src/iosys/gowin_dpb_menu.v"
 add_file -type verilog "src/iosys/iosys_bl616.v"
 add_file -type verilog "src/iosys/textdisp.v"
 add_file -type verilog "src/iosys/uart_fixed.v"
+add_file -type verilog "src/iosys/ui16/ui_frame_decoder.sv"
+add_file -type verilog "src/iosys/ui16/ui16_transport.sv"
+add_file -type verilog "src/iosys/ui16/ui_textdisp.sv"
 add_file -type verilog "src/monitor2hdmi.v"
 add_file -type verilog "src/monitor_top.v"
 add_file -type gao -disable "src/monitor_console60k.rao"

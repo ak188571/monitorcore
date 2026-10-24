@@ -549,7 +549,7 @@ textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
     .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
 );
 wire ui16_abort;
-wire ui16_we, ui16_selected, ui16_half;
+wire ui16_we, ui16_selected, ui16_half, ui16_vertical_half;
 wire unused_ui16_error, unused_ui16_busy, unused_ui16_color_valid;
 wire [7:0] ui16_x, ui16_y;
 wire [11:0] ui16_glyph;
@@ -557,7 +557,7 @@ ui16_transport #(.FREQ(FREQ)) ui16_rx (
     .clk(clk), .resetn(resetn), .rx_data(rx_data), .rx_valid(rx_valid),
     .abort_frame(ui16_abort), .error(unused_ui16_error), .busy(unused_ui16_busy),
     .we(ui16_we), .x(ui16_x), .y(ui16_y), .glyph(ui16_glyph),
-    .selected(ui16_selected), .half(ui16_half)
+    .selected(ui16_selected), .half(ui16_half), .vertical_half(ui16_vertical_half)
 );
 `ifdef UI16_SELFTEST
 localparam UI16_TEST = 1;
@@ -568,7 +568,7 @@ wire [14:0] ui16_color;
 ui_textdisp #(.SELFTEST(UI16_TEST != 0)) ui16_disp (
     .clk(clk), .hclk(hclk), .resetn(resetn),
     .we(ui16_we), .wr_x(ui16_x), .wr_y(ui16_y), .wr_glyph(ui16_glyph),
-    .wr_selected(ui16_selected), .wr_half(ui16_half),
+    .wr_selected(ui16_selected), .wr_half(ui16_half), .wr_vertical_half(ui16_vertical_half),
     .x(overlay_x), .y(overlay_y), .color(ui16_color), .color_valid(unused_ui16_color_valid)
 );
 reg ui16_mode = 0;

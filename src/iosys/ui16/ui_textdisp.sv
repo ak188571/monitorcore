@@ -11,12 +11,12 @@ module ui_textdisp #(
     input logic we,
     input logic [7:0] wr_x, wr_y,
     input logic [11:0] wr_glyph,
-    input logic wr_selected, wr_half,
+    input logic wr_selected, wr_half, wr_vertical_half,
     input logic [7:0] x, y,
     output logic [14:0] color,
     output logic color_valid
 );
-    logic [13:0] cells [0:(1 << `UI_CELL_ADDR_BITS)-1];
+    logic [14:0] cells [0:(1 << `UI_CELL_ADDR_BITS)-1];
     logic [15:0] font_rom [0:`UI_FONT_ROM_SIZE-1];
     initial begin
         if (SELFTEST)
@@ -29,7 +29,7 @@ module ui_textdisp #(
         `UI_CELL_ADDR_BITS'(int'(wr_y)*`UI_TEXT_UNITS_PER_ROW + int'(wr_x));
     always_ff @(posedge clk) begin
         if (resetn && we && int'(wr_x)<`UI_TEXT_UNITS_PER_ROW && int'(wr_y)<`UI_MENU_ROWS)
-            cells[wr_addr] <= {wr_half, wr_selected, wr_glyph};
+            cells[wr_addr] <= {wr_vertical_half, wr_half, wr_selected, wr_glyph};
     end
 
     // Synchronize reset release to the read clock.
@@ -38,21 +38,22 @@ module ui_textdisp #(
         if (!resetn) reset_pipe <= 0;
         else reset_pipe <= {reset_pipe[0], 1'b1};
     end
-    logic [13:0] cell_q;
+    logic [14:0] cell_q;
     logic [2:0] xoff1;
-    logic [3:0] yoff1, glyph_x2;
+    logic [2:0] yoff1;
+    logic [3:0] glyph_x2;
     logic selected2, valid1, valid2;
     logic [15:0] font_q;
     wire [`UI_CELL_ADDR_BITS-1:0] read_addr =
-        `UI_CELL_ADDR_BITS'((int'(y)/`UI_GLYPH_BITMAP_HEIGHT)*`UI_TEXT_UNITS_PER_ROW +
+        `UI_CELL_ADDR_BITS'((int'(y)/`UI_VERTICAL_UNIT_HEIGHT)*`UI_TEXT_UNITS_PER_ROW +
                             int'(x)/`UI_TEXT_UNIT_WIDTH);
     // Two synchronous memory reads. Registers next to each read carry its metadata.
     always_ff @(posedge hclk) begin
         cell_q <= cells[read_addr];
-        xoff1 <= x[2:0]; yoff1 <= y[3:0];
+        xoff1 <= x[2:0]; yoff1 <= y[2:0];
         valid1 <= reset_pipe[1] && int'(y)<`UI_SCREEN_HEIGHT;
 
-        font_q <= font_rom[`UI_FONT_ADDR_BITS'({cell_q[11:0],yoff1})];
+        font_q <= font_rom[`UI_FONT_ADDR_BITS'({cell_q[11:0],cell_q[14],yoff1})];
         glyph_x2 <= {cell_q[13],xoff1};
         selected2 <= cell_q[12]; valid2 <= valid1;
 
