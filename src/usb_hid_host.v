@@ -1,13 +1,13 @@
 // Usb_hid_host: A compact USB HID host core.
 //
 // nand2mario, 8/2023, based on work by hi631
-// 
-// This should support keyboard, mouse and gamepad input out of the box, over low-speed 
-// USB (1.5Mbps). Just connect D+, D-, VBUS (5V) and GND, and two 15K resistors between 
+//
+// This should support keyboard, mouse and gamepad input out of the box, over low-speed
+// USB (1.5Mbps). Just connect D+, D-, VBUS (5V) and GND, and two 15K resistors between
 // D+ and GND, D- and GND. Then provide a 12Mhz clock through usbclk.
 //
 // See https://github.com/nand2mario/usb_hid_host
-// 
+//
 // 3/22/2025: add LB and RB buttons, and SNES layout output `game_snes`
 
 module usb_hid_host (
@@ -16,7 +16,7 @@ module usb_hid_host (
     inout  usb_dm, usb_dp,          // USB D- and D+
 
     output reg [1:0] typ,           // device type. 0: no device, 1: keyboard, 2: mouse, 3: gamepad
-    output reg report,              // pulse after report received from device. 
+    output reg report,              // pulse after report received from device.
                                     // key_*, mouse_*, game_* valid depending on typ
     output conerr,                  // connection or protocol error
 
@@ -29,14 +29,17 @@ module usb_hid_host (
     output reg signed [7:0] mouse_dx,      // signed 8-bit, cleared after `report` pulse
     output reg signed [7:0] mouse_dy,      // signed 8-bit, cleared after `report` pulse
 
-    // gamepad 
+    // gamepad
     output [11:0] game_snes,        // SNES layout buttons (R L X A RT LT DN UP START SELECT Y B)
     output reg game_l, game_r, game_u, game_d,  // left right up down
-    output reg game_a, game_b, game_x, game_y, game_sel, game_sta,  // buttons 
+    output reg game_a, game_b, game_x, game_y, game_sel, game_sta,  // buttons
     output reg game_lb, game_rb,
 
     // debug
-    output [63:0] dbg_hid_report	// last HID report
+    output [63:0] dbg_hid_report, // last HID report
+    output dbg_connected,
+    output reg dbg_auto_start_seen = 0,
+    output reg dbg_auto_wdt_seen = 0
 );
 
 wire data_rdy;          // data ready
@@ -62,14 +65,58 @@ wire [3:0] save_r;      // which register to save to
 wire [3:0] save_b;      // dat[b]
 wire connected;
 reg retry;              // retry because we did not detect a HID device
+wire start_wait;
+wire host_reset_n;
+reg [20:0] start_wait_count = 0;
+reg [15:0] reset_hold = 16'd60000;
+reg recovery_armed = 0;
+reg recovery_attempted = 0;
+integer data_i;
+integer regs_i;
+
+// After a report, reset the entire host on a stalled START or UKP watchdog.
+// A new report rearms recovery; no report means no reset loop.
+assign host_reset_n = usbrst_n && reset_hold == 0;
+assign dbg_connected = connected;
+wire recovery_start_trigger = host_reset_n && recovery_armed && !recovery_attempted &&
+                              start_wait && start_wait_count == 21'd1199999;
+wire recovery_wdt_trigger = host_reset_n && recovery_armed && !recovery_attempted && conerr;
+wire recovery_trigger = recovery_start_trigger || recovery_wdt_trigger;
+always @(posedge usbclk) begin
+    if (!usbrst_n) begin
+        start_wait_count <= 0;
+        reset_hold <= 16'd60000;
+        recovery_armed <= 0;
+        recovery_attempted <= 0;
+        dbg_auto_start_seen <= 0;
+        dbg_auto_wdt_seen <= 0;
+    end else begin
+        if (report) begin
+            recovery_armed <= 1;
+            recovery_attempted <= 0;
+        end
+        if (!host_reset_n || !start_wait || !recovery_armed || recovery_attempted)
+            start_wait_count <= 0;
+        else if (start_wait_count < 21'd1200000)
+            start_wait_count <= start_wait_count + 1'b1;
+        if (recovery_trigger) begin
+            start_wait_count <= 0;
+            reset_hold <= 16'd60000;
+            recovery_attempted <= 1;
+            if (recovery_start_trigger) dbg_auto_start_seen <= 1;
+            if (recovery_wdt_trigger) dbg_auto_wdt_seen <= 1;
+        end else if (reset_hold != 0)
+            reset_hold <= reset_hold - 1'b1;
+    end
+end
 
 assign game_snes = {game_rb, game_lb, game_x, game_a, game_r, game_l, game_d, game_u, game_sta, game_sel, game_y, game_b};
 
 ukp ukp(
-    .usbrst_n(usbrst_n & ~retry), .usbclk(usbclk),
+    .usbrst_n(host_reset_n & ~retry), .usbclk(usbclk),
     .usb_dp(usb_dp), .usb_dm(usb_dm), .usb_oe(),
     .ukprdy(data_rdy), .ukpstb(data_strobe), .ukpdat(ukpdat), .save(save), .save_r(save_r), .save_b(save_b),
-    .connected(connected), .conerr(conerr));
+    .connected(connected), .conerr(conerr), .start_wait(start_wait));
 
 reg  [3:0] rcvct;		// counter for recv data
 reg  data_strobe_r, data_rdy_r;	// delayed data_strobe and data_rdy
@@ -79,7 +126,7 @@ assign dbg_hid_report = {dat[7], dat[6], dat[5], dat[4], dat[3], dat[2], dat[1],
 
 // Gamepad types, see response_recognition below
 // localparam D_GENERIC = 0;
-// localparam D_GAMEPAD = 1;			
+// localparam D_GAMEPAD = 1;
 // localparam D_DS2_ADAPTER = 2;
 // reg [3:0] dev = D_GENERIC;			// device type recognized through VID/PID
 // assign dbg_dev = dev;
@@ -87,6 +134,21 @@ assign dbg_hid_report = {dat[7], dat[6], dat[5], dat[4], dat[3], dat[2], dat[1],
 reg valid = 0;		    // whether current gamepad report is valid
 
 always @(posedge usbclk) begin : process_in_data
+    if (!host_reset_n) begin
+        data_rdy_r <= 0;
+        data_strobe_r <= 0;
+        rcvct <= 0;
+        report <= 0;
+        valid <= 0;
+        key_modifiers <= 0;
+        key1 <= 0; key2 <= 0; key3 <= 0; key4 <= 0;
+        mouse_btn <= 0; mouse_dx <= 0; mouse_dy <= 0;
+        game_l <= 0; game_r <= 0; game_u <= 0; game_d <= 0;
+        game_a <= 0; game_b <= 0; game_x <= 0; game_y <= 0;
+        game_sel <= 0; game_sta <= 0; game_lb <= 0; game_rb <= 0;
+        for (data_i = 0; data_i < 8; data_i = data_i + 1)
+            dat[data_i] <= 0;
+    end else begin
     data_rdy_r <= data_rdy; data_strobe_r <= data_strobe;
     report <= 0;                    // ensure pulse
     if (report == 1) begin
@@ -224,16 +286,25 @@ always @(posedge usbclk) begin : process_in_data
         game_sel <= 0; game_sta <= 0;
         game_lb <= 0; game_rb <= 0;
     end
+    end
 end
 
 reg save_delayed;
 reg connected_r;
 always @(posedge usbclk) begin : response_recognition
+    if (!host_reset_n) begin
+        save_delayed <= 0;
+        connected_r <= 0;
+        retry <= 0;
+        typ <= 0;
+        for (regs_i = 0; regs_i < 7; regs_i = regs_i + 1)
+            regs[regs_i] <= 0;
+    end else begin
     save_delayed <= save;
     retry <= 0;
     if (save) begin
         regs[save_r] <= dat[save_b];
-    end else if (save_delayed && ~save && save_r == 6) begin     
+    end else if (save_delayed && ~save && save_r == 6) begin
         // falling edge of save for bInterfaceProtocol
         if (regs[4] == 3) begin  // bInterfaceClass. 3: HID, other: non-HID
             if (regs[5] == 1)    // bInterfaceSubClass. 1: Boot device
@@ -245,6 +316,7 @@ always @(posedge usbclk) begin : response_recognition
     end
     connected_r <= connected;
     if (~connected & connected_r) typ <= 0;   // clear device type on disconnect
+    end
 end
 
 endmodule
@@ -260,7 +332,8 @@ module ukp(
     output reg save,			// save: regs[save_r] <= dat[save_b]
     output reg [3:0] save_r, save_b,
     output reg connected,
-    output conerr
+    output conerr,
+    output start_wait
 );
 
     parameter S_OPCODE = 0;
@@ -298,7 +371,7 @@ module ukp(
     wire next = ~(state == S_OPCODE & (
         inst ==2 & dmi |								// start
         (inst==4 || inst==5) & timing != 0 |			// out0/hiz
-        inst ==13 & (~sample | (dpi | dmi) & wk != 1) |	// in 
+        inst ==13 & (~sample | (dpi | dmi) & wk != 1) |	// in
         inst ==14 & ~interval_cy						// wait
     ));
     wire branch = state == S_B1 & cond;
@@ -309,14 +382,23 @@ module ukp(
     reg  dmid;
     reg [23:0] conct;
     assign conerr = conct[23] || ~usbrst_n;
+    assign start_wait = inst_ready && state == S_OPCODE && inst == 4'd2 && dmi;
 
     usb_hid_host_rom ukprom(.clk(usbclk), .adr(pc), .data(inst));
 
     always @(posedge usbclk) begin
-        if(~usbrst_n) begin 
-            pc <= 0; connected <= 0; cond <= 0; inst_ready <= 0; state <= S_OPCODE; timing <= 0; 
-            mbit <= 0; bitadr <= 0; nak <= 1; ug <= 0;
-            save <= 0;
+        if(~usbrst_n) begin
+            pc <= 0; wpc <= 0; connected <= 0; cond <= 0;
+            inst_ready <= 0; insth <= 0; state <= S_OPCODE;
+            timing <= 0; interval <= 0; mbit <= 0; bitadr <= 0;
+            nak <= 1; ug <= 0; ugw <= 0; up <= 0; um <= 0;
+            dmi <= 0; dpi <= 0; dmid <= 0; dmis <= 0;
+            nrztxct <= 0; nrzrxct <= 0; nrzon <= 0;
+            lb4 <= 0; lb4w <= 0; wk <= 0; sb <= 0; sadr <= 0;
+            data <= 0; ukpdat <= 0; ukprdy <= 0; ukprdyd <= 0;
+            save <= 0; save_r <= 0; save_b <= 0;
+            bank <= 0; record1 <= 0; stated <= 0; nakd <= 0;
+            conct <= 0;
         end else begin
             dpi <= usb_dp; dmi <= usb_dm;
             save <= 0;		// ensure pulse
@@ -355,7 +437,7 @@ module ukp(
                     S_S0: begin sb[3:0] <= inst; state <= S_S1; end
                     S_S1: begin sb[7:4] <= inst; state <= S_S2; mbit <= 1; end
                     // toggle and save
-                    S_TOGGLE0: begin 
+                    S_TOGGLE0: begin
                         if (inst == 15) connected <= ~connected;// toggle
                         else save_r <= inst;                    // save
                         state <= S_TOGGLE1;
@@ -369,7 +451,7 @@ module ukp(
                     end
                 endcase
                 // pc control
-                if (mbit==0) begin 
+                if (mbit==0) begin
                     if(jmppc) wpc <= pc + 4;
                     if (next | branch | retpc) begin
                         if(retpc) pc <= wpc;					// ret
@@ -396,22 +478,22 @@ module ukp(
                 end else begin
                     up <=  sb[{1'b1,sadr[1:0]}]; um <= sb[sadr[2:0]];
                 end
-                ug <= 1'b1; 
+                ug <= 1'b1;
                 if(nrztxct!=6) sadr <= sadr - 4'd1;
                 if(sadr==0) begin mbit <= 0; state <= S_OPCODE; end
             end
             // start instruction
             dmid <= dmi;
-            if (inst_ready & state == S_OPCODE & inst == 4'b0010) begin // op=start 
+            if (inst_ready & state == S_OPCODE & inst == 4'b0010) begin // op=start
                 bitadr <= 0; nak <= 1; nrzrxct <= 0;
-            end else 
+            end else
                 if(ug==0 && dmi!=dmid) timing <= 1;
                 else                   timing <= timing + 1;
             // IN instruction
             if (sample) begin
                 if (bitadr == 8) nak <= dmi;
                 if(nrzrxct!=6) begin
-                    data[6:0] <= data[7:1]; 
+                    data[6:0] <= data[7:1];
                     data[7] <= dmis ~^ dmi;		    // ~^/^~ is XNOR, testing bit equality
                     bitadr <= bitadr + 1; nrzon <= 0;
                 end else nrzon <= 1;
@@ -432,12 +514,12 @@ module ukp(
             // Connection status & WDT
             ukprdyd <= ukprdy;
             nakd <= nak;
-            if (ukprdy && ~ukprdyd || inst_ready && state == S_OPCODE && inst == 4'b0010) 
+            if (ukprdy && ~ukprdyd || inst_ready && state == S_OPCODE && inst == 4'b0010)
                 conct <= 0;     // reset watchdog on data received or START instruction
-            else begin 
+            else begin
                 if(conct[23:22]!=2'b11) conct <= conct + 1;
                 else begin pc <= 0; conct <= 0; end		// !! WDT ON
-            end 
+            end
         end
     end
 
@@ -447,7 +529,7 @@ module ukp(
     assign sample = inst_ready & state == S_OPCODE & inst == 4'b1101 & timing == 4; // IN
     assign record = connected & ~nak;
     assign ukpstb = ~nrzon & ukprdy & (bitadr[2:0] == 3'b100) & (timing == 2);
-    reg    dpi, dmi; 
+    reg    dpi, dmi;
     reg    ukprdyd;
     reg    nakd;
 endmodule
@@ -456,7 +538,7 @@ module usb_hid_host_rom(clk, adr, data);
 	input clk;
 	input [13:0] adr;
 	output [3:0] data;
-	reg [3:0] data; 
+	reg [3:0] data;
 	reg [3:0] mem [635];
 	initial $readmemh("usb_hid_host_rom.hex", mem);
 	always @(posedge clk) data <= mem[adr];

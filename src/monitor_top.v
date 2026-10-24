@@ -144,6 +144,8 @@ wire pll_lock_12;
 wire usb_conerr;
 wire [1:0] usb_type;
 wire usb_report;
+wire p1_connected;
+wire p1_auto_start_seen, p1_auto_wdt_seen;
 
 pll_12 pll12(
     .clkin(sys_clk),
@@ -153,95 +155,69 @@ pll_12 pll12(
 
 usb_hid_host usb_hid_host (
     .usbclk(clk12),
-    .usbrst_n(pll_lock_12),
+    .usbrst_n(pll_lock_12 && s0),
     .usb_dm(usb1_dn),
     .usb_dp(usb1_dp),
     .game_snes(joy_usb1),
     .typ(usb_type),
     .conerr(usb_conerr),
-    .report(usb_report)
+    .report(usb_report),
+    .dbg_connected(p1_connected),
+    .dbg_auto_start_seen(p1_auto_start_seen),
+    .dbg_auto_wdt_seen(p1_auto_wdt_seen)
 );
-
-
-// -------------------------------------------------
-// USB connection / report diagnostic
-// -------------------------------------------------
-
-// reportを見やすい長さまで保持する
-reg [20:0] report_hold = 0;
-
-// 一度でもconerrが発生したことを記憶する
-reg conerr_seen = 0;
-
-// HID reportを受信するたびにカウント
-reg [7:0] report_count = 0;
-
-always @(posedge clk12) begin
-    if (!pll_lock_12) begin
-        report_hold  <= 0;
-        conerr_seen  <= 0;
-        report_count <= 0;
-    end
-    else begin
-
-        // HID reportを受信したら約100ms表示
-        if (usb_report) begin
-            report_hold  <= 21'd1200000;
-            report_count <= report_count + 1'b1;
-        end
-        else if (report_hold != 0) begin
-            report_hold <= report_hold - 1'b1;
-        end
-
-        // conerrは一度発生したら保持
-        if (usb_conerr)
-            conerr_seen <= 1'b1;
-    end
-end
-
-wire report_recent;
-assign report_recent = (report_hold != 0);
-
-
-// -------------------------------------------------
-// PMOD0 LED diagnostic display
-// -------------------------------------------------
-//
-// LED0 : 12MHz PLL lock
-// LED1 : usb_type[0]
-// LED2 : usb_type[1]
-// LED3 : HID report received recently
-// LED4 : conerr now
-// LED5 : conerr has occurred at least once
-// LED6 : HID report counter
-// LED7 : any joy_usb1 button/direction active
-//
-// PMOD LEDはactive-lowとして反転
-//
-assign led = ~{
-    |joy_usb1,        // LED7
-    report_count[4],  // LED6
-    conerr_seen,      // LED5
-    usb_conerr,       // LED4
-    report_recent,    // LED3
-    usb_type[1],      // LED2
-    usb_type[0],      // LED1
-    pll_lock_12       // LED0
-};
 
 `else
 assign joy_usb1 = 12'b0;
 `endif
 
 `ifdef USB2
+wire p2_report;
+wire p2_connected;
+wire p2_auto_start_seen, p2_auto_wdt_seen;
 usb_hid_host usb_hid_host2 (
-    .usbclk(clk12), .usbrst_n(pll_lock_12),
+    .usbclk(clk12), .usbrst_n(pll_lock_12 && s0),
     .usb_dm(usb2_dn), .usb_dp(usb2_dp),
-    .game_snes(joy_usb2)
+    .game_snes(joy_usb2), .report(p2_report),
+    .dbg_connected(p2_connected),
+    .dbg_auto_start_seen(p2_auto_start_seen),
+    .dbg_auto_wdt_seen(p2_auto_wdt_seen)
 );
 `else
 assign joy_usb2 = 12'b0;
 `endif
+
+// P1/P2 share the PMOD LED pattern used by the successful Host test.
+reg [11:0] p1_buttons_prev = 0, p2_buttons_prev = 0;
+reg [22:0] p1_button_hold = 0, p1_report_hold = 0;
+reg [22:0] p2_button_hold = 0, p2_report_hold = 0;
+localparam integer LED_HOLD_CYCLES = 6000000; // 0.5 s at 12 MHz
+always @(posedge clk12) begin
+    if (!pll_lock_12 || !s0) begin
+        p1_buttons_prev <= 0;
+        p2_buttons_prev <= 0;
+        p1_button_hold <= 0;
+        p1_report_hold <= 0;
+        p2_button_hold <= 0;
+        p2_report_hold <= 0;
+    end else begin
+        p1_buttons_prev <= joy_usb1;
+        p2_buttons_prev <= joy_usb2;
+        if (|(joy_usb1 & ~p1_buttons_prev)) p1_button_hold <= LED_HOLD_CYCLES;
+        else if (p1_button_hold != 0) p1_button_hold <= p1_button_hold - 1'b1;
+        if (usb_report) p1_report_hold <= LED_HOLD_CYCLES;
+        else if (p1_report_hold != 0) p1_report_hold <= p1_report_hold - 1'b1;
+        if (|(joy_usb2 & ~p2_buttons_prev)) p2_button_hold <= LED_HOLD_CYCLES;
+        else if (p2_button_hold != 0) p2_button_hold <= p2_button_hold - 1'b1;
+        if (p2_report) p2_report_hold <= LED_HOLD_CYCLES;
+        else if (p2_report_hold != 0) p2_report_hold <= p2_report_hold - 1'b1;
+    end
+end
+wire [7:0] led_lit = {(p2_auto_start_seen || p2_auto_wdt_seen),
+                      (p2_report_hold != 0), p2_connected, (p2_button_hold != 0),
+                      (p1_auto_start_seen || p1_auto_wdt_seen),
+                      (p1_report_hold != 0), p1_connected, (p1_button_hold != 0)};
+assign led = s0 ? ~led_lit : 8'h00; // S1 holds all eight LEDs on
 
 wire [14:0] overlay_color;
 wire [7:0] overlay_x;
