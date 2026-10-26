@@ -16,6 +16,6 @@ verilator --cc --exe --build --top-module ui16_monitor_top -I. --Mdir obj_dir/ui
   -DUI16_ENABLE -Wno-fatal -Wno-ASSIGNIN tests/ui16_monitor_top.sv \
   tests/legacy_textdisp_stub.sv tests/assertion_error_stub.sv src/iosys/iosys_bl616.v \
   src/iosys/uart_fixed.v src/iosys/ui16/ui_textdisp.sv \
-  src/iosys/ui16/ui16_transport.sv src/iosys/ui16/ui_frame_decoder.sv \
+  src/iosys/ui16/ui16_transport.sv src/iosys/ui16/ui_font_transport.sv src/iosys/ui16/ui_reliable_link.sv src/iosys/ui16/ui_frame_decoder.sv \
   "$project_dir/tests/ui16_monitor_test.cpp" -CFLAGS "$cflags" "${linker_args[@]}"
 ./obj_dir/ui16_monitor/Vui16_monitor_top

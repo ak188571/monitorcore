@@ -47,6 +47,7 @@ if {$dev eq "nano20k"} {
     add_file -type verilog "src/plla/pll_12.v"
     add_file -type verilog "src/usb_hid_host.v"
     add_file -type cst "src/boards/console.cst"
+    add_file -type sdc "src/boards/console_ui16.sdc"
 } elseif {$dev eq "console138k"} {
     set_device GW5AST-LV138PG484AC1/I0 -device_version B
     add_file -type verilog "src/boards/console138k_ui_uart.v"
@@ -55,6 +56,7 @@ if {$dev eq "nano20k"} {
     add_file -type verilog "src/pll/pll_12.v"
     add_file -type verilog "src/usb_hid_host.v"
     add_file -type cst "src/boards/console.cst"
+    add_file -type sdc "src/boards/console_ui16.sdc"
 } else {
     error "Unknown device $dev"
 }
@@ -62,6 +64,7 @@ set_option -output_base_name monitor_${dev}
 
 add_file -type verilog "src/controller_ds2.sv"
 add_file -type verilog "src/controller_snes.v"
+add_file -type verilog "src/cdc_snapshot.sv"
 add_file -type verilog "src/dualshock_controller.v"
 add_file -type verilog "src/hdmi/audio_clock_regeneration_packet.sv"
 add_file -type verilog "src/hdmi/audio_info_frame.sv"
@@ -79,6 +82,8 @@ add_file -type verilog "src/iosys/textdisp.v"
 add_file -type verilog "src/iosys/uart_fixed.v"
 add_file -type verilog "src/iosys/ui16/ui_frame_decoder.sv"
 add_file -type verilog "src/iosys/ui16/ui16_transport.sv"
+add_file -type verilog "src/iosys/ui16/ui_font_transport.sv"
+add_file -type verilog "src/iosys/ui16/ui_reliable_link.sv"
 add_file -type verilog "src/iosys/ui16/ui_textdisp.sv"
 add_file -type verilog "src/monitor2hdmi.v"
 add_file -type verilog "src/monitor_top.v"

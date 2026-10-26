@@ -15,6 +15,6 @@ linker_args=()
 if [[ -n "$ldflags" ]]; then linker_args=(-LDFLAGS "$ldflags"); fi
 verilator --cc --exe --build --top-module ui16_hw_top -I. --Mdir obj_dir/ui16_hw \
   -Wno-fatal tests/ui16_hw_top.sv tests/assertion_error_stub.sv src/iosys/ui16/ui_textdisp.sv \
-  src/iosys/ui16/ui16_transport.sv src/iosys/ui16/ui_frame_decoder.sv src/iosys/uart_fixed.v \
+  src/iosys/ui16/ui16_transport.sv src/iosys/ui16/ui_font_transport.sv src/iosys/ui16/ui_reliable_link.sv src/iosys/ui16/ui_frame_decoder.sv src/iosys/uart_fixed.v \
   "$project_dir/tests/ui16_hw_test.cpp" -CFLAGS "$cflags" "${linker_args[@]}"
 ./obj_dir/ui16_hw/Vui16_hw_top

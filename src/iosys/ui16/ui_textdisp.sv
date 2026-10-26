@@ -12,6 +12,10 @@ module ui_textdisp #(
     input logic [7:0] wr_x, wr_y,
     input logic [11:0] wr_glyph,
     input logic wr_selected, wr_half, wr_vertical_half,
+    input logic font_we,
+    input logic [`UI_FONT_ADDR_BITS-1:0] font_wr_addr,
+    input logic [15:0] font_wr_data,
+    input logic font_display_enabled,
     input logic [7:0] x, y,
     output logic [14:0] color,
     output logic color_valid
@@ -28,15 +32,18 @@ module ui_textdisp #(
     wire [`UI_CELL_ADDR_BITS-1:0] wr_addr =
         `UI_CELL_ADDR_BITS'(int'(wr_y)*`UI_TEXT_UNITS_PER_ROW + int'(wr_x));
     always_ff @(posedge clk) begin
+        if (resetn && font_we) font_rom[font_wr_addr] <= font_wr_data;
         if (resetn && we && int'(wr_x)<`UI_TEXT_UNITS_PER_ROW && int'(wr_y)<`UI_MENU_ROWS)
             cells[wr_addr] <= {wr_vertical_half, wr_half, wr_selected, wr_glyph};
     end
 
     // Synchronize reset release to the read clock.
-    logic [1:0] reset_pipe = 0;
+    logic [1:0] reset_pipe = 0 /* synthesis syn_preserve=1 */;
+    logic [1:0] font_gate_sync = 0 /* synthesis syn_preserve=1 */;
     always_ff @(posedge hclk) begin
-        if (!resetn) reset_pipe <= 0;
-        else reset_pipe <= {reset_pipe[0], 1'b1};
+        reset_pipe <= {reset_pipe[0],resetn};
+        if (!reset_pipe[1]) font_gate_sync <= 0;
+        else font_gate_sync <= {font_gate_sync[0],font_display_enabled};
     end
     logic [14:0] cell_q;
     logic [2:0] xoff1;
@@ -59,7 +66,7 @@ module ui_textdisp #(
 
         color_valid <= valid2 && reset_pipe[1];
         color <= 0;
-        if (valid2 && reset_pipe[1] && font_q[15-int'(glyph_x2)]) begin
+        if (valid2 && reset_pipe[1] && font_gate_sync[1] && font_q[15-int'(glyph_x2)]) begin
             // PC constants are RGB555. TangCore overlay is BGR555.
             if (selected2)
                 color <= {5'(`UI_COLOR_SELECTED),5'(`UI_COLOR_SELECTED >> 5),5'(`UI_COLOR_SELECTED >> 10)};

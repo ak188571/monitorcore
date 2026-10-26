@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdio>
 #include <vector>
+double sc_time_stamp(){return 0;}
 struct Sim {
     Vui16_monitor_top t;
     unsigned long long time=0;
@@ -20,5 +21,8 @@ int main(int argc,char**argv){
     s.frame({0xAA,0,6,15,0,0,1,0,0});assert(s.t.color==0);
     s.frame({0xAA,0,6,15,0,0,1,0});s.cycles(500100); // missing attr; both parsers must reset
     s.frame({0xAA,0,3,4,0,0});s.frame({0xAA,0,2,5,'A'});assert(s.t.color==0x1234);
-    std::puts("monitor integration passed: real UART, new/legacy switching, timeout resets both parsers; legacy display uses test stub");
+    // A valid BLANK must cover the complete overlay mux even before the first
+    // protected row selects the UI16 renderer.
+    s.frame({0xAA,0,3,0x13,0,0});assert(s.t.color==0);
+    std::puts("monitor integration passed: real UART, new/legacy switching, global BLANK gate, timeout resets both parsers; legacy display uses test stub");
 }

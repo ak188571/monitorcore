@@ -9,6 +9,8 @@ module ui16_transport #(
     output logic busy,
     output logic error,
     output logic we,
+    output logic verified_we,
+    output logic full_row_we,
     output logic [7:0] x, y,
     output logic [11:0] glyph,
     output logic selected, half, vertical_half
@@ -28,7 +30,7 @@ module ui16_transport #(
     ui_frame_decoder decoder (
         .clk(clk), .reset(!resetn), .rx_data(rx_data), .rx_valid(rx_valid),
         .rx_abort(abort_frame), .busy(busy), .receiving(receiving), .error(error),
-        .we(we), .x(x), .y(y), .glyph(glyph), .selected(selected), .half(half),
+        .we(we), .verified_we(verified_we), .full_row_we(full_row_we), .x(x), .y(y), .glyph(glyph), .selected(selected), .half(half),
         .vertical_half(vertical_half)
     );
 endmodule

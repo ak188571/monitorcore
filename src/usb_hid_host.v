@@ -539,7 +539,7 @@ module usb_hid_host_rom(clk, adr, data);
 	input [13:0] adr;
 	output [3:0] data;
 	reg [3:0] data;
-	reg [3:0] mem [635];
+	reg [3:0] mem [0:635]; // 636 nibbles in usb_hid_host_rom.hex
 	initial $readmemh("usb_hid_host_rom.hex", mem);
 	always @(posedge clk) data <= mem[adr];
 endmodule

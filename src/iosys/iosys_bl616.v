@@ -1,3 +1,4 @@
+`include "src/iosys/ui16/ui_config.svh"
 // IOSys_bl616 - BL616-based IO system
 // 
 // This manages UART connection to the companion bl616 MCU, accepts ROM loading and other requests,
@@ -346,9 +347,25 @@ localparam SEND_FDD_READ = 5;
 
 localparam SEND_HEADER = 6;
 localparam SEND_DONE = 7;
+localparam SEND_LINK_ACK = 8;
 
-reg [2:0] send_state, send_state_next;
-reg [$clog2(STR_LEN+1)-1:0] send_idx;
+reg [3:0] send_state, send_state_next;
+reg [9:0] send_idx;
+`ifdef UI16_ENABLE
+`ifndef SIM
+wire ui16_ack_pending;
+wire [111:0] ui16_ack_data;
+reg ui16_ack_done;
+`else
+wire ui16_ack_pending=0;
+wire [111:0] ui16_ack_data=0;
+reg ui16_ack_done;
+`endif
+`else
+wire ui16_ack_pending=0;
+wire [111:0] ui16_ack_data=0;
+reg ui16_ack_done;
+`endif
 localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
 reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
 reg [15:0] joy1_reg;
@@ -360,8 +377,10 @@ always @(posedge clk) begin
     if (!resetn) begin
         joy_timer <= 0;
         send_state <= 0;
+        ui16_ack_done <= 0;
     end else begin
         tx_valid <= 0;
+        ui16_ack_done <= 0;
         mgmt_read <= 0;
         fdd_read_start <= 0;
         fdd_write_finish <= 0;
@@ -373,7 +392,11 @@ always @(posedge clk) begin
         case (send_state)
             SEND_IDLE: begin
                 send_idx <= 0;
-                if (joy_timer == 0 && (joy1 != joy1_reg || joy2 != joy2_reg)) begin
+                if (ui16_ack_pending) begin
+                    send_state_next <= SEND_LINK_ACK;
+                    send_state <= SEND_HEADER;
+                    resp_frame_len <= 15;
+                end else if (joy_timer == 0 && (joy1 != joy1_reg || joy2 != joy2_reg)) begin
                     joy_timer <= JOY_UPDATE_INTERVAL;
                     joy1_reg <= joy1;
                     joy2_reg <= joy2;
@@ -412,7 +435,7 @@ always @(posedge clk) begin
                         1: tx_data <= resp_frame_len[15:8];
                         2: tx_data <= resp_frame_len[7:0];
                         3: begin
-                            tx_data <= send_state_next;
+                            tx_data <= send_state_next == SEND_LINK_ACK ? 8'h16 : {4'b0,send_state_next};
                             send_state <= send_state_next;
                             send_idx <= 0;
                         end
@@ -456,6 +479,18 @@ always @(posedge clk) begin
                     if (send_idx == 3) begin
                         send_state <= SEND_IDLE;
                         response_ack <= response_req;
+                    end
+                end
+            end
+
+            SEND_LINK_ACK: begin
+                if (tx_ready && ~tx_valid) begin
+                    tx_data <= ui16_ack_data[8*(13-send_idx)+:8];
+                    tx_valid <= 1;
+                    send_idx <= send_idx + 1;
+                    if (send_idx == 13) begin
+                        send_state <= SEND_IDLE;
+                        ui16_ack_done <= 1;
                     end
                 end
             end
@@ -549,14 +584,21 @@ textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
     .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
 );
 wire ui16_abort;
-wire ui16_we, ui16_selected, ui16_half, ui16_vertical_half;
+wire ui16_we, ui16_verified_we, ui16_full_row_we, ui16_selected, ui16_half, ui16_vertical_half;
 wire unused_ui16_error, unused_ui16_busy, unused_ui16_color_valid;
 wire [7:0] ui16_x, ui16_y;
 wire [11:0] ui16_glyph;
+wire [7:0] ui16_replay_data;
+wire ui16_replay_valid;
+wire ui16_live_update;
+wire [7:0] ui16_rx_data;
+wire ui16_rx_valid;
+assign ui16_rx_data=ui16_replay_valid ? ui16_replay_data : rx_data;
+assign ui16_rx_valid=ui16_replay_valid || rx_valid;
 ui16_transport #(.FREQ(FREQ)) ui16_rx (
-    .clk(clk), .resetn(resetn), .rx_data(rx_data), .rx_valid(rx_valid),
+    .clk(clk), .resetn(resetn), .rx_data(ui16_rx_data), .rx_valid(ui16_rx_valid),
     .abort_frame(ui16_abort), .error(unused_ui16_error), .busy(unused_ui16_busy),
-    .we(ui16_we), .x(ui16_x), .y(ui16_y), .glyph(ui16_glyph),
+    .we(ui16_we), .verified_we(ui16_verified_we), .full_row_we(ui16_full_row_we), .x(ui16_x), .y(ui16_y), .glyph(ui16_glyph),
     .selected(ui16_selected), .half(ui16_half), .vertical_half(ui16_vertical_half)
 );
 `ifdef UI16_SELFTEST
@@ -564,26 +606,58 @@ localparam UI16_TEST = 1;
 `else
 localparam UI16_TEST = 0;
 `endif
+wire ui16_font_we, ui16_font_enabled, unused_ui16_font_error;
+ui_reliable_link #(.FREQ(FREQ)) ui16_link (
+    .clk(clk),.resetn(resetn),.rx_data(rx_data),.rx_valid(rx_valid),
+    .row_error(unused_ui16_error),.font_error(unused_ui16_font_error),
+    .replay_data(ui16_replay_data),.replay_valid(ui16_replay_valid),.live_update(ui16_live_update),
+    .ack_pending(ui16_ack_pending),.ack_data(ui16_ack_data),.ack_done(ui16_ack_done)
+);
+wire [`UI_FONT_ADDR_BITS-1:0] ui16_font_addr;
+wire [15:0] ui16_font_data;
+ui_font_transport #(.FREQ(FREQ)) ui16_font_rx (
+    .clk(clk), .resetn(resetn), .rx_data(ui16_rx_data), .rx_valid(ui16_rx_valid),.live_update(ui16_live_update),
+    .row_error(unused_ui16_error), .row_we(ui16_full_row_we), .row_x(ui16_x), .row_y(ui16_y),
+    .font_we(ui16_font_we), .font_addr(ui16_font_addr), .font_data(ui16_font_data),
+    .display_enabled(ui16_font_enabled), .error(unused_ui16_font_error)
+);
+// Version-2 wrapped rows may update the visible menu; raw CRC8 rows still
+// require BLANK. The firmware uploads only hidden font slots before live rows.
+wire ui16_cell_we = ui16_we && (!ui16_verified_we || !ui16_font_enabled || ui16_live_update);
 wire [14:0] ui16_color;
 ui_textdisp #(.SELFTEST(UI16_TEST != 0)) ui16_disp (
     .clk(clk), .hclk(hclk), .resetn(resetn),
-    .we(ui16_we), .wr_x(ui16_x), .wr_y(ui16_y), .wr_glyph(ui16_glyph),
+    .we(ui16_cell_we), .wr_x(ui16_x), .wr_y(ui16_y), .wr_glyph(ui16_glyph),
     .wr_selected(ui16_selected), .wr_half(ui16_half), .wr_vertical_half(ui16_vertical_half),
+    .font_we(ui16_font_we), .font_wr_addr(ui16_font_addr), .font_wr_data(ui16_font_data),
+    .font_display_enabled(ui16_font_enabled),
     .x(overlay_x), .y(overlay_y), .color(ui16_color), .color_valid(unused_ui16_color_valid)
 );
 reg ui16_mode = 0;
 always @(posedge clk) begin
     if (!resetn) ui16_mode <= 0;
-    else if (ui16_we) ui16_mode <= 1;
+    else if (ui16_cell_we) ui16_mode <= 1;
     else if (we) ui16_mode <= 0;
 end
 // The display mode crosses into the HDMI clock domain as a single-bit control.
-reg [1:0] ui16_mode_sync = 0;
+reg [1:0] ui16_reset_sync = 0 /* synthesis syn_preserve=1 */;
+reg [1:0] ui16_mode_sync = 0 /* synthesis syn_preserve=1 */;
+reg [1:0] ui16_font_enabled_sync = 0 /* synthesis syn_preserve=1 */;
 always @(posedge hclk) begin
-    if (!resetn) ui16_mode_sync <= 0;
-    else ui16_mode_sync <= {ui16_mode_sync[0],ui16_mode};
+    ui16_reset_sync <= {ui16_reset_sync[0],resetn};
+    if (!ui16_reset_sync[1]) begin
+        ui16_mode_sync <= 0;
+        ui16_font_enabled_sync <= 0;
+    end else begin
+        ui16_mode_sync <= {ui16_mode_sync[0],ui16_mode};
+        ui16_font_enabled_sync <= {ui16_font_enabled_sync[0],ui16_font_enabled};
+    end
 end
-assign overlay_color = (UI16_TEST != 0 || ui16_mode_sync[1]) ? ui16_color : legacy_color;
+// BLANK covers the complete overlay mux, including the first transition from
+// the legacy renderer. This prevents an old legacy cell from remaining visible
+// until the first protected UI16 row commits.
+assign overlay_color = !ui16_font_enabled_sync[1] ? 15'd0 :
+                       ((UI16_TEST != 0 || ui16_mode_sync[1]) ? ui16_color : legacy_color);
 `else
 textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
     .clk(clk), .hclk(hclk), .resetn(resetn),

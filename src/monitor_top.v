@@ -135,6 +135,7 @@ controller_ds2 #(.FREQ(FREQ)) joy2_ds2 (
 );
 `endif
 
+wire [11:0] joy_usb1_raw, joy_usb2_raw;
 wire [11:0] joy_usb1, joy_usb2;
 
 `ifdef USB1
@@ -158,7 +159,7 @@ usb_hid_host usb_hid_host (
     .usbrst_n(pll_lock_12 && s0),
     .usb_dm(usb1_dn),
     .usb_dp(usb1_dp),
-    .game_snes(joy_usb1),
+    .game_snes(joy_usb1_raw),
     .typ(usb_type),
     .conerr(usb_conerr),
     .report(usb_report),
@@ -167,7 +168,30 @@ usb_hid_host usb_hid_host (
     .dbg_auto_wdt_seen(p1_auto_wdt_seen)
 );
 
+// Delay snapshots until the decoded bus is stable, including cleared buttons
+// after host disconnect or manual reset.
+reg usb_report1_delayed = 0, p1_connected_prev = 0, p1_s0_prev = 1;
+always @(posedge clk12) begin
+    if (!pll_lock_12) begin
+        usb_report1_delayed <= 0;
+        p1_connected_prev <= 0;
+        p1_s0_prev <= 1;
+    end else begin
+        usb_report1_delayed <= usb_report ||
+            (p1_connected_prev && !p1_connected) || (p1_s0_prev && !s0);
+        p1_connected_prev <= p1_connected;
+        p1_s0_prev <= s0;
+    end
+end
+wire unused_joy_usb1_valid;
+cdc_snapshot #(.WIDTH(12)) joy_usb1_cdc (
+    .src_clk(clk12), .src_resetn(pll_lock_12),
+    .src_valid(usb_report1_delayed), .src_data(joy_usb1_raw),
+    .dst_clk(clk), .dst_resetn(resetn),
+    .dst_data(joy_usb1), .dst_valid(unused_joy_usb1_valid)
+);
 `else
+assign joy_usb1_raw = 12'b0;
 assign joy_usb1 = 12'b0;
 `endif
 
@@ -178,12 +202,35 @@ wire p2_auto_start_seen, p2_auto_wdt_seen;
 usb_hid_host usb_hid_host2 (
     .usbclk(clk12), .usbrst_n(pll_lock_12 && s0),
     .usb_dm(usb2_dn), .usb_dp(usb2_dp),
-    .game_snes(joy_usb2), .report(p2_report),
+    .game_snes(joy_usb2_raw), .report(p2_report),
     .dbg_connected(p2_connected),
     .dbg_auto_start_seen(p2_auto_start_seen),
     .dbg_auto_wdt_seen(p2_auto_wdt_seen)
 );
+// Delay snapshots until the decoded bus is stable, including cleared buttons
+// after host disconnect or manual reset.
+reg usb_report2_delayed = 0, p2_connected_prev = 0, p2_s0_prev = 1;
+always @(posedge clk12) begin
+    if (!pll_lock_12) begin
+        usb_report2_delayed <= 0;
+        p2_connected_prev <= 0;
+        p2_s0_prev <= 1;
+    end else begin
+        usb_report2_delayed <= p2_report ||
+            (p2_connected_prev && !p2_connected) || (p2_s0_prev && !s0);
+        p2_connected_prev <= p2_connected;
+        p2_s0_prev <= s0;
+    end
+end
+wire unused_joy_usb2_valid;
+cdc_snapshot #(.WIDTH(12)) joy_usb2_cdc (
+    .src_clk(clk12), .src_resetn(pll_lock_12),
+    .src_valid(usb_report2_delayed), .src_data(joy_usb2_raw),
+    .dst_clk(clk), .dst_resetn(resetn),
+    .dst_data(joy_usb2), .dst_valid(unused_joy_usb2_valid)
+);
 `else
+assign joy_usb2_raw = 12'b0;
 assign joy_usb2 = 12'b0;
 `endif
 
@@ -201,13 +248,13 @@ always @(posedge clk12) begin
         p2_button_hold <= 0;
         p2_report_hold <= 0;
     end else begin
-        p1_buttons_prev <= joy_usb1;
-        p2_buttons_prev <= joy_usb2;
-        if (|(joy_usb1 & ~p1_buttons_prev)) p1_button_hold <= LED_HOLD_CYCLES;
+        p1_buttons_prev <= joy_usb1_raw;
+        p2_buttons_prev <= joy_usb2_raw;
+        if (|(joy_usb1_raw & ~p1_buttons_prev)) p1_button_hold <= LED_HOLD_CYCLES;
         else if (p1_button_hold != 0) p1_button_hold <= p1_button_hold - 1'b1;
         if (usb_report) p1_report_hold <= LED_HOLD_CYCLES;
         else if (p1_report_hold != 0) p1_report_hold <= p1_report_hold - 1'b1;
-        if (|(joy_usb2 & ~p2_buttons_prev)) p2_button_hold <= LED_HOLD_CYCLES;
+        if (|(joy_usb2_raw & ~p2_buttons_prev)) p2_button_hold <= LED_HOLD_CYCLES;
         else if (p2_button_hold != 0) p2_button_hold <= p2_button_hold - 1'b1;
         if (p2_report) p2_report_hold <= LED_HOLD_CYCLES;
         else if (p2_report_hold != 0) p2_report_hold <= p2_report_hold - 1'b1;
