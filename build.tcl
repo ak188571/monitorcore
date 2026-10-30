@@ -1,3 +1,7 @@
+# console138k selects the verified USB build; other targets retain their existing path.
+if {$argc > 0 && [lindex $argv 0] eq "console138k"} {
+    source [file join [file dirname [info script]] "build_console138k_usb.tcl"]
+} else {
 if {$argc == 0} {
     puts "Usage: $argv0 <device>"
     puts "          device: nano20k, primer25k, mega60k, mega138k, mega138k_31002, console60k, console138k"
@@ -97,3 +101,5 @@ set_option -use_mspi_as_gpio 1
 set_option -use_cpu_as_gpio 1
 
 run all
+
+}

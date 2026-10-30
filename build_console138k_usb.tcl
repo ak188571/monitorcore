@@ -1,0 +1,122 @@
+# Verified USB path for Tang Mega138K Console; other boards use build.tcl.
+if {$argc < 1 || [lindex $argv 0] ne "console138k"} {
+    error "This script targets console138k; use build.tcl for other devices."
+}
+if {$argc == 0} {
+    puts "Usage: $argv0 <device>"
+    puts "          device: nano20k, primer25k, mega60k, mega138k, mega138k_31002, console60k, console138k"
+    exit 1
+}
+
+set dev [lindex $argv 0]
+
+if {$dev eq "nano20k"} {
+    set_device GW2AR-LV18QN88C8/I7 -device_version C
+    add_file -type verilog "src/boards/nano20k.v"
+    add_file -type verilog "src/pllr/gowin_pll_hdmi.v"
+    add_file -type cst "src/nano20k/monitor.cst"
+} elseif {$dev eq "primer25k"} {
+    set_device GW5A-LV25MG121NC1/I0 -device_version A
+    add_file -type verilog "src/boards/primer25k.v"
+    add_file -type verilog "src/plla/pll_27.v"
+    add_file -type verilog "src/plla/pll_74.v"
+    add_file -type verilog "src/plla/pll_12.v"
+    add_file -type verilog "src/usb_hid_host.v"
+    add_file -type cst "src/boards/primer25k.cst"
+    set_option -use_ready_as_gpio 1
+    set_option -use_done_as_gpio 1
+} elseif {$dev eq "mega60k"} {
+    set_device GW5AT-LV60PG484AC1/I0 -device_version B
+    add_file -type verilog "src/boards/mega60k.v"
+    add_file -type verilog "src/plla/pll_27.v"
+    add_file -type verilog "src/plla/pll_74.v"
+    add_file -type cst "src/boards/mega60k.cst"
+} elseif {$dev eq "mega138k"} {
+    set_device GW5AST-LV138PG484AC1/I0 -device_version B
+    add_file -type verilog "src/boards/mega138k.v"
+    add_file -type verilog "src/pll/pll_27.v"
+    add_file -type verilog "src/pll/pll_74.v"
+    add_file -type cst "src/boards/mega138k_31002.cst"
+} elseif {$dev eq "mega138k_31002"} {
+    set_device GW5AST-LV138PG484AC1/I0 -device_version B
+    add_file -type verilog "src/boards/mega138k.v"
+    add_file -type verilog "src/pll/pll_27.v"
+    add_file -type verilog "src/pll/pll_74.v"
+    add_file -type cst "src/boards/mega138k_31002.cst"
+} elseif {$dev eq "console60k"} {
+    set_device GW5AT-LV60PG484AC1/I0 -device_version B
+    add_file -type verilog "src/boards/console60k.v"
+    add_file -type verilog "src/plla/pll_27.v"
+    add_file -type verilog "src/plla/pll_74.v"
+    add_file -type verilog "src/plla/pll_12.v"
+    add_file -type verilog "src/usb_hid_host.v"
+    add_file -type cst "src/boards/console.cst"
+    add_file -type sdc "src/boards/console_ui16.sdc"
+} elseif {$dev eq "console138k"} {
+    set_device GW5AST-LV138PG484AC1/I0 -device_version B
+    add_file -type verilog "src/boards/console138k_ui_uart.v"
+    add_file -type verilog "src/pll/pll_27.v"
+    add_file -type verilog "src/pll/pll_74.v"
+    add_file -type verilog "src/pll/pll_usb.v"
+    add_file -type verilog "src/usb/usb_game_port.sv"
+    add_file -type verilog "src/usb/usb_frame_scheduler.sv"
+    add_file -type verilog "src/usb/usb_interrupt_poll.sv"
+    add_file -type verilog "src/usb/usb_control_transfer.sv"
+    add_file -type verilog "src/usb/usb_enumeration.sv"
+    add_file -type verilog "src/usb/usb_ls_packet.sv"
+    add_file -type verilog "src/usb/usb_rx_guard.sv"
+    add_file -type verilog "src/usb/usb_game_cdc.sv"
+    add_file -type verilog "src/usb/usb_hid_host_integrated.sv"
+    add_file -type cst "src/boards/console.cst"
+    add_file -type sdc "src/boards/console_ui16.sdc"
+} else {
+    error "Unknown device $dev"
+}
+set_option -output_base_name monitor_${dev}
+
+add_file -type verilog "src/controller_ds2.sv"
+add_file -type verilog "src/controller_snes.v"
+add_file -type verilog "src/cdc_snapshot.sv"
+add_file -type verilog "src/dualshock_controller.v"
+add_file -type verilog "src/hdmi/audio_clock_regeneration_packet.sv"
+add_file -type verilog "src/hdmi/audio_info_frame.sv"
+add_file -type verilog "src/hdmi/audio_sample_packet.sv"
+add_file -type verilog "src/hdmi/auxiliary_video_information_info_frame.sv"
+add_file -type verilog "src/hdmi/hdmi.sv"
+add_file -type verilog "src/hdmi/packet_assembler.sv"
+add_file -type verilog "src/hdmi/packet_picker.sv"
+add_file -type verilog "src/hdmi/serializer.sv"
+add_file -type verilog "src/hdmi/source_product_description_info_frame.sv"
+add_file -type verilog "src/hdmi/tmds_channel.sv"
+add_file -type verilog "src/iosys/gowin_dpb_menu.v"
+add_file -type verilog "src/iosys/iosys_bl616.v"
+add_file -type verilog "src/iosys/textdisp.v"
+add_file -type verilog "src/iosys/uart_fixed.v"
+add_file -type verilog "src/iosys/ui16/ui_frame_decoder.sv"
+add_file -type verilog "src/iosys/ui16/ui16_transport.sv"
+add_file -type verilog "src/iosys/ui16/ui_font_transport.sv"
+add_file -type verilog "src/iosys/ui16/ui_reliable_link.sv"
+add_file -type verilog "src/iosys/ui16/ui_textdisp.sv"
+add_file -type verilog "src/monitor2hdmi.v"
+add_file -type verilog "src/monitor_console138k_usb_top.v"
+add_file -type gao -disable "src/monitor_console60k.rao"
+add_file -type verilog "src/usb/usb_fs_packet.sv"
+add_file -type verilog "src/usb/usb_fs_rx_guard.sv"
+add_file -type verilog "src/usb/usb_fs_frame_scheduler.sv"
+add_file -type verilog "src/usb/usb_xusb_poll.sv"
+add_file -type verilog "src/usb/usb_xusb_input.sv"
+add_file -type verilog "src/usb/usb_fs_control_transfer.sv"
+add_file -type verilog "src/usb/usb_xusb_enumeration.sv"
+add_file -type verilog "src/usb/usb_xusb_port.sv"
+add_file -type verilog "src/usb/usb_dual_speed_host.sv"
+set_option -synthesis_tool gowinsynthesis
+set_option -top_module monitor_top
+set_option -verilog_std sysv2017
+set_option -rw_check_on_ram 1
+set_option -use_sspi_as_gpio 1
+set_option -use_mspi_as_gpio 1
+set_option -use_cpu_as_gpio 1
+
+add_file -type sdc "console138k_combined.sdc"
+run syn
+run pnr
