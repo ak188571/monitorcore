@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <cstdlib>
+double sc_time_stamp(){return 0;}
 
 static std::vector<unsigned> hex(const char* name) {
     std::ifstream f(name);assert(f);std::vector<unsigned> words;std::string s;
@@ -36,7 +37,7 @@ struct Simulation {
 };
 static unsigned expected(const std::vector<unsigned>& cells,const std::vector<unsigned>& font,int x,int y) {
     if(y>=224)return 0;
-    auto c=cells[(y/16)*32+x/8];auto row=font[(c&4095)*16+y%16];
+    auto c=cells[(y/8)*32+x/8];auto row=font[(c&4095)*16+((c>>14)&1)*8+y%8];
     int offset=((c>>13)&1)*8+x%8;
     if(!(row&(1u<<(15-offset))))return 0;
     // Selected RGB (30,28,8) -> BGR (8,28,30); ordinary text is (26,26,26).
@@ -44,8 +45,8 @@ static unsigned expected(const std::vector<unsigned>& cells,const std::vector<un
 }
 static std::vector<unsigned> frame(const std::vector<unsigned>& cells) {
     std::vector<unsigned> out;
-    for(int y=0;y<14;++y){out.insert(out.end(),{0xAA,0,68,15,unsigned(y),0,32});
-        for(int x=0;x<32;++x){auto c=cells[y*32+x];out.push_back(c&255);out.push_back(((c>>6)&60)|((c>>12)&3));}}
+    for(int y=0;y<28;++y){out.insert(out.end(),{0xAA,0,68,15,unsigned(y),0,32});
+        for(int x=0;x<32;++x){auto c=cells[y*32+x];out.push_back(c&255);out.push_back(((c>>6)&60)|((c>>12)&3)|((c&0x4000)?0x40:0));}}
     return out;
 }
 int main(int argc,char**argv) {
@@ -54,7 +55,16 @@ int main(int argc,char**argv) {
     sim.t.serial_rx=1;sim.t.byte_data=sim.t.x=sim.t.y=0;sim.cycles(20);
     sim.t.resetn=1;sim.cycles(20);
     auto font=hex("src/iosys/ui16/font16_full.hex"),cells=hex("src/iosys/ui16/cells_selftest.hex");
-    assert(font.size()%16==0&&font.size()>=4096&&cells.size()==512);
+    if(cells.size()==512){
+        std::vector<unsigned> expanded(1024);
+        for(int y=0;y<14;++y)for(int x=0;x<32;++x){
+            const auto c=cells[y*32+x];expanded[(2*y)*32+x]=c;expanded[(2*y+1)*32+x]=c|0x4000;
+        }
+        cells=std::move(expanded);
+    }
+    assert(font.size()%16==0&&font.size()>=4096&&cells.size()>=896);
+    assert(sim.t.font_visible);
+    // Keep the original initialized-font check, using the current 8px vertical cells.
     for(int y=0;y<256;++y)for(int x=0;x<256;++x){
         sim.t.x=x;sim.t.y=y;sim.hcycles(3);
         assert(sim.t.selftest_color==expected(cells,font,x,y));assert(sim.t.color==0);
@@ -82,17 +92,17 @@ int main(int argc,char**argv) {
     sim.cycles(499900);assert(sim.aborts==0);
     sim.cycles(200);assert(sim.aborts==1&&sim.errors==1);
     // Recovery frame clears the whole screen; old glyphs disappear.
-    auto zeros=std::vector<unsigned>(448,0);for(auto b:frame(zeros))sim.byte(b);
+    auto zeros=std::vector<unsigned>(896,0);for(auto b:frame(zeros))sim.byte(b);
     for(int y=0;y<224;++y)for(int x=0;x<256;++x){sim.t.x=x;sim.t.y=y;sim.hcycles(3);assert(sim.t.color==0);}
     const auto writes=sim.t.writes;
     // Old 8-bit command is ignored, reserved bits and out-of-ROM IDs reject the whole row.
     for(auto b:std::vector<unsigned>{0xAA,0,6,14,0,0,1,1,0})sim.byte(b);
     sim.cycles(10);assert(sim.t.writes==writes&&sim.errors==1);
-    for(auto high:std::vector<unsigned>{64,128}){
+    for(auto high:std::vector<unsigned>{128}){
         for(auto b:std::vector<unsigned>{0xAA,0,6,15,0,0,1,1,high})sim.byte(b);
     }
     const unsigned slots=font.size()/16;
-    unsigned errors=3;
+    unsigned errors=2;
     if(slots<4096){
         for(auto b:std::vector<unsigned>{0xAA,0,6,15,0,0,1,slots&255,(slots>>8)<<2})sim.byte(b);
         ++errors;
@@ -101,5 +111,5 @@ int main(int argc,char**argv) {
     const unsigned last=slots-1;
     for(auto b:std::vector<unsigned>{0xAA,0,6,15,0,0,1,last&255,((last>>8)<<2)|3})sim.byte(b);
     sim.cycles(10);assert(sim.t.writes==writes+1&&sim.t.last_glyph==last);
-    std::puts("hardware UI tests passed: selftest, 994 serial bytes, full pixel comparison, 3-edge pipeline, independent clocks, 10ms timeout, recovery/clear");
+    std::puts("hardware UI tests passed: 1988 serial bytes, 8px vertical cells, full pixel comparison, 3-edge pipeline, independent clocks, 10ms timeout, recovery/clear");
 }
